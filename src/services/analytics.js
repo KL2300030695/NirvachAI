@@ -1,18 +1,18 @@
-import { logEvent } from 'firebase/analytics';
-import { getAnalyticsInstance } from '../config/firebase';
+import { getAnalyticsInstance, isFirebaseConfigured } from '../config/firebase';
 
 /**
  * Safely log an analytics event
  */
 const safeLogEvent = async (eventName, params = {}) => {
+  if (!isFirebaseConfigured) return;
   try {
+    const { logEvent } = await import('firebase/analytics');
     const analytics = await getAnalyticsInstance();
     if (analytics) {
       logEvent(analytics, eventName, params);
     }
   } catch (error) {
     // Silently fail — analytics should never break the app
-    console.debug('Analytics event failed:', eventName, error);
   }
 };
 

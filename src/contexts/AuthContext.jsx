@@ -1,14 +1,18 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import {
-  signInWithPopup,
-  signInAnonymously,
-  signOut as firebaseSignOut,
-  onAuthStateChanged,
-} from 'firebase/auth';
-import { auth, googleProvider } from '../config/firebase';
 import { trackLogin, trackSignUp } from '../services/analytics';
+import { auth, googleProvider, isFirebaseConfigured } from '../config/firebase';
 
 const AuthContext = createContext(null);
+
+// Dynamically import Firebase Auth functions only if Firebase is configured
+let signInWithPopup, signInAnonymously, firebaseSignOut, onAuthStateChanged;
+if (isFirebaseConfigured && auth) {
+  const firebaseAuth = await import('firebase/auth');
+  signInWithPopup = firebaseAuth.signInWithPopup;
+  signInAnonymously = firebaseAuth.signInAnonymously;
+  firebaseSignOut = firebaseAuth.signOut;
+  onAuthStateChanged = firebaseAuth.onAuthStateChanged;
+}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -20,7 +24,7 @@ export function AuthProvider({ children }) {
     if (newProfile && newProfile.uid) {
       try {
         localStorage.setItem(`nirvachai_user_${newProfile.uid}`, JSON.stringify(newProfile));
-      } catch (e) { /* storage full, ignore */ }
+      } catch (e) { /* storage full */ }
     }
   }, []);
 
@@ -32,7 +36,7 @@ export function AuthProvider({ children }) {
         setUserProfile(parsed);
         return parsed;
       }
-    } catch (e) { /* ignore parse errors */ }
+    } catch (e) { /* ignore */ }
 
     const newProfile = {
       uid: userData.uid,
@@ -57,7 +61,6 @@ export function AuthProvider({ children }) {
     return newProfile;
   }, [updateLocalProfile]);
 
-  // Create a local guest user (no Firebase needed)
   const createLocalGuest = useCallback(() => {
     const guestId = `guest_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     const guestUser = {
@@ -89,68 +92,68 @@ export function AuthProvider({ children }) {
       }
     } catch (e) { /* ignore */ }
 
-    // Listen to Firebase auth state (if Firebase is configured)
-    try {
-      unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-        if (firebaseUser) {
-          const userData = {
-            uid: firebaseUser.uid,
-            displayName: firebaseUser.displayName || 'Citizen',
-            email: firebaseUser.email || null,
-            photoURL: firebaseUser.photoURL || null,
-            isAnonymous: firebaseUser.isAnonymous,
-          };
-          setUser(userData);
-          localStorage.setItem('nirvachai_session', JSON.stringify({ user: userData }));
-          loadOrCreateProfile(userData);
-        }
+    // Listen to Firebase auth if available
+    if (isFirebaseConfigured && auth && onAuthStateChanged) {
+      try {
+        unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+          if (firebaseUser) {
+            const userData = {
+              uid: firebaseUser.uid,
+              displayName: firebaseUser.displayName || 'Citizen',
+              email: firebaseUser.email || null,
+              photoURL: firebaseUser.photoURL || null,
+              isAnonymous: firebaseUser.isAnonymous,
+            };
+            setUser(userData);
+            localStorage.setItem('nirvachai_session', JSON.stringify({ user: userData }));
+            loadOrCreateProfile(userData);
+          }
+          setLoading(false);
+        });
+      } catch (e) {
         setLoading(false);
-      });
-    } catch (e) {
-      console.warn('Firebase auth listener failed:', e);
+      }
+    } else {
       setLoading(false);
     }
 
-    // If no saved session and no firebase user after timeout, stop loading
     const timeout = setTimeout(() => setLoading(false), 2000);
-
     return () => {
       if (unsubscribe) unsubscribe();
       clearTimeout(timeout);
     };
   }, [loadOrCreateProfile]);
 
-  // Google Sign-In
   const signInWithGoogle = async () => {
-    try {
-      const result = await signInWithPopup(auth, googleProvider);
-      trackLogin('google');
-      return result.user;
-    } catch (error) {
-      console.warn('Google sign-in failed, using local guest:', error.code);
-      // Fallback to local guest
-      return createLocalGuest();
+    if (isFirebaseConfigured && auth && signInWithPopup && googleProvider) {
+      try {
+        const result = await signInWithPopup(auth, googleProvider);
+        trackLogin('google');
+        return result.user;
+      } catch (error) {
+        console.warn('Google sign-in failed:', error.code);
+      }
     }
+    return createLocalGuest();
   };
 
-  // Guest Sign-In (tries Firebase anonymous, falls back to local)
   const signInAsGuest = async () => {
-    try {
-      const result = await signInAnonymously(auth);
-      trackLogin('anonymous');
-      return result.user;
-    } catch (error) {
-      console.warn('Firebase anonymous auth unavailable, using local guest:', error.code);
-      // Local-only guest mode
-      return createLocalGuest();
+    if (isFirebaseConfigured && auth && signInAnonymously) {
+      try {
+        const result = await signInAnonymously(auth);
+        trackLogin('anonymous');
+        return result.user;
+      } catch (error) {
+        console.warn('Anonymous auth failed:', error.code);
+      }
     }
+    return createLocalGuest();
   };
 
-  // Sign Out
   const signOut = async () => {
-    try {
-      await firebaseSignOut(auth);
-    } catch (e) { /* ignore if firebase not configured */ }
+    if (isFirebaseConfigured && auth && firebaseSignOut) {
+      try { await firebaseSignOut(auth); } catch (e) { /* ignore */ }
+    }
     setUser(null);
     setUserProfile(null);
     localStorage.removeItem('nirvachai_session');
