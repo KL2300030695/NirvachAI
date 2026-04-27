@@ -242,7 +242,7 @@ VITE_GEMINI_API_KEY=your_gemini_key
 
 ## 🔗 Links
 
-- **Live Demo**: [Coming Soon]
+- **Live Demo**: https://nirvach-ai.vercel.app/
 - **ECI Official**: [eci.gov.in](https://eci.gov.in)
 - **Voter Portal**: [voters.eci.gov.in](https://voters.eci.gov.in)
 - **SVEEP**: [ecisveep.nic.in](https://ecisveep.nic.in)
