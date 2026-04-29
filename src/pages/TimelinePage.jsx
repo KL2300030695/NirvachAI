@@ -1,10 +1,18 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { electionStages } from '../data/electionStages';
 import { useFirestore } from '../hooks/useFirestore';
 import { trackPageView, trackTimelineStageViewed } from '../services/analytics';
+import { formatPercentage } from '../utils/formatters';
+import { TIMELINE } from '../config/constants';
 import { ChevronDown, ChevronUp, CheckCircle2, Scale, Users } from 'lucide-react';
 import './pages.css';
 
+/**
+ * TimelinePage — Interactive visualization of the 9-stage Indian election process.
+ * Each stage can be expanded to reveal key steps, facts, officials, and legal references.
+ * Progress is tracked per-user.
+ * @returns {JSX.Element}
+ */
 export default function TimelinePage() {
   const [expandedStage, setExpandedStage] = useState(null);
   const [completedStages, setCompletedStages] = useState(new Set());
@@ -12,8 +20,13 @@ export default function TimelinePage() {
 
   useEffect(() => { trackPageView('Timeline'); }, []);
 
-  const toggleStage = (id, index) => {
-    setExpandedStage(expandedStage === id ? null : id);
+  /**
+   * Toggle stage expansion and mark as completed on first view
+   * @param {string} id - Stage ID
+   * @param {number} index - Stage index
+   */
+  const toggleStage = useCallback((id, index) => {
+    setExpandedStage(prev => prev === id ? null : id);
     if (expandedStage !== id) {
       trackTimelineStageViewed(id, index);
       if (!completedStages.has(id)) {
@@ -21,9 +34,9 @@ export default function TimelinePage() {
         completeTimelineStage(id);
       }
     }
-  };
+  }, [expandedStage, completedStages, completeTimelineStage]);
 
-  const progress = Math.round((completedStages.size / electionStages.length) * 100);
+  const progress = formatPercentage(completedStages.size, TIMELINE.TOTAL_STAGES);
 
   return (
     <div className="page-container">
@@ -36,7 +49,7 @@ export default function TimelinePage() {
       <div className="timeline-progress glass-card-static animate-fade-in-up">
         <div className="timeline-progress-header">
           <span className="timeline-progress-label">Your Learning Progress</span>
-          <span className="timeline-progress-value">{completedStages.size}/{electionStages.length} stages explored</span>
+          <span className="timeline-progress-value">{completedStages.size}/{TIMELINE.TOTAL_STAGES} stages explored</span>
         </div>
         <div className="progress-bar">
           <div className="progress-bar-fill" style={{ width: `${progress}%` }} />
@@ -75,7 +88,7 @@ export default function TimelinePage() {
               >
                 <div className="timeline-card-header">
                   <div className="timeline-card-left">
-                    <span className="timeline-stage-icon">{stage.icon}</span>
+                    <span className="timeline-stage-icon" aria-hidden="true">{stage.icon}</span>
                     <div>
                       <h3 className="timeline-card-title">{stage.title}</h3>
                       <span className="timeline-card-duration badge" style={{ background: `${stage.color}15`, color: stage.color, border: `1px solid ${stage.color}25` }}>

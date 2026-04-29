@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { trackLogin, trackSignUp } from '../services/analytics';
 import { auth, googleProvider, isFirebaseConfigured } from '../config/firebase';
+import { STORAGE_KEYS, PERFORMANCE } from '../config/constants';
 
 const AuthContext = createContext(null);
 
@@ -14,6 +15,11 @@ if (isFirebaseConfigured && auth) {
   onAuthStateChanged = firebaseAuth.onAuthStateChanged;
 }
 
+/**
+ * AuthProvider — Manages authentication state across the application.
+ * Supports Firebase Google Sign-In, Firebase Anonymous Auth, and local guest mode.
+ * @param {{ children: React.ReactNode }} props
+ */
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
@@ -23,14 +29,14 @@ export function AuthProvider({ children }) {
     setUserProfile(newProfile);
     if (newProfile && newProfile.uid) {
       try {
-        localStorage.setItem(`nirvachai_user_${newProfile.uid}`, JSON.stringify(newProfile));
+        localStorage.setItem(`${STORAGE_KEYS.USER_PREFIX}${newProfile.uid}`, JSON.stringify(newProfile));
       } catch (e) { /* storage full */ }
     }
   }, []);
 
   const loadOrCreateProfile = useCallback((userData) => {
     try {
-      const stored = localStorage.getItem(`nirvachai_user_${userData.uid}`);
+      const stored = localStorage.getItem(`${STORAGE_KEYS.USER_PREFIX}${userData.uid}`);
       if (stored) {
         const parsed = JSON.parse(stored);
         setUserProfile(parsed);
@@ -71,7 +77,7 @@ export function AuthProvider({ children }) {
       isAnonymous: true,
     };
     setUser(guestUser);
-    localStorage.setItem('nirvachai_session', JSON.stringify({ user: guestUser }));
+    localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify({ user: guestUser }));
     loadOrCreateProfile(guestUser);
     trackLogin('local_guest');
     return guestUser;
@@ -82,7 +88,7 @@ export function AuthProvider({ children }) {
 
     // Restore local session
     try {
-      const saved = localStorage.getItem('nirvachai_session');
+      const saved = localStorage.getItem(STORAGE_KEYS.SESSION);
       if (saved) {
         const session = JSON.parse(saved);
         if (session.user) {
@@ -105,7 +111,7 @@ export function AuthProvider({ children }) {
               isAnonymous: firebaseUser.isAnonymous,
             };
             setUser(userData);
-            localStorage.setItem('nirvachai_session', JSON.stringify({ user: userData }));
+            localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify({ user: userData }));
             loadOrCreateProfile(userData);
           }
           setLoading(false);
@@ -117,7 +123,7 @@ export function AuthProvider({ children }) {
       setLoading(false);
     }
 
-    const timeout = setTimeout(() => setLoading(false), 2000);
+    const timeout = setTimeout(() => setLoading(false), PERFORMANCE.AUTH_TIMEOUT);
     return () => {
       if (unsubscribe) unsubscribe();
       clearTimeout(timeout);
@@ -156,7 +162,7 @@ export function AuthProvider({ children }) {
     }
     setUser(null);
     setUserProfile(null);
-    localStorage.removeItem('nirvachai_session');
+    localStorage.removeItem(STORAGE_KEYS.SESSION);
   };
 
   const value = {
@@ -177,6 +183,11 @@ export function AuthProvider({ children }) {
   );
 }
 
+/**
+ * Custom hook to access authentication context.
+ * Must be used within an AuthProvider.
+ * @returns {{ user: Object|null, userProfile: Object|null, updateLocalProfile: Function, loading: boolean, signInWithGoogle: Function, signInAsGuest: Function, signOut: Function, isAuthenticated: boolean }}
+ */
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {

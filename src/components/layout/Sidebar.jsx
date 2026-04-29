@@ -1,20 +1,25 @@
 import { useState, useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { ROUTES, APP } from '../../config/constants';
 import {
   Home, MessageCircle, Clock, Brain, BookOpen, LayoutDashboard,
   ClipboardCheck, LogOut, LogIn, Menu, X, ChevronRight
 } from 'lucide-react';
 import './layout.css';
 
+/**
+ * Navigation items for the sidebar.
+ * @type {Array<{path: string, label: string, icon: import('lucide-react').LucideIcon}>}
+ */
 const navItems = [
-  { path: '/', label: 'Home', icon: Home },
-  { path: '/chat', label: 'AI Assistant', icon: MessageCircle },
-  { path: '/timeline', label: 'Election Timeline', icon: Clock },
-  { path: '/quiz', label: 'Knowledge Quiz', icon: Brain },
-  { path: '/encyclopedia', label: 'Encyclopedia', icon: BookOpen },
-  { path: '/checklist', label: 'Voter Checklist', icon: ClipboardCheck },
-  { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { path: ROUTES.HOME, label: 'Home', icon: Home },
+  { path: ROUTES.CHAT, label: 'AI Assistant', icon: MessageCircle },
+  { path: ROUTES.TIMELINE, label: 'Election Timeline', icon: Clock },
+  { path: ROUTES.QUIZ, label: 'Knowledge Quiz', icon: Brain },
+  { path: ROUTES.ENCYCLOPEDIA, label: 'Encyclopedia', icon: BookOpen },
+  { path: ROUTES.CHECKLIST, label: 'Voter Checklist', icon: ClipboardCheck },
+  { path: ROUTES.DASHBOARD, label: 'Dashboard', icon: LayoutDashboard },
 ];
 
 export default function Sidebar() {
@@ -53,7 +58,7 @@ export default function Sidebar() {
         <div className="sidebar-header">
           <div className="sidebar-logo">
             <span className="sidebar-logo-icon">🗳️</span>
-            {!collapsed && <span className="sidebar-logo-text gradient-text-tricolor">NirvachAI</span>}
+            {!collapsed && <span className="sidebar-logo-text gradient-text-tricolor">{APP.NAME}</span>}
           </div>
           <button
             className="sidebar-collapse-btn btn-icon hide-mobile"
