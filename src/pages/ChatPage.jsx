@@ -1,10 +1,18 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Sparkles, RotateCcw, ExternalLink } from 'lucide-react';
 import { generateChatResponse } from '../services/gemini';
 import { useFirestore } from '../hooks/useFirestore';
-import { trackPageView, trackChatMessage } from '../services/analytics';
+import { trackPageView, trackChatMessage, trackChatResponse } from '../services/analytics';
+import { measureAsync, TRACE_NAMES } from '../services/performanceService';
+import { sanitizeForDisplay, validateChatMessage, createRateLimiter } from '../utils/validators';
+import { extractTopicHint } from '../utils/formatters';
+import { APP } from '../config/constants';
 import './pages.css';
 
+/**
+ * Suggested questions displayed when the chat is empty.
+ * @type {string[]}
+ */
 const suggestedQuestions = [
   'How does the Indian election process work?',
   'What is the role of the Election Commission?',
@@ -16,6 +24,14 @@ const suggestedQuestions = [
   'Explain postal ballots in India',
 ];
 
+/** Rate limiter: max 1 message per second */
+const chatRateLimiter = createRateLimiter(1000);
+
+/**
+ * ChatPage — AI-powered election Q&A chat interface.
+ * Uses Google Gemini AI for responses with Firebase Performance traces.
+ * @returns {JSX.Element}
+ */
 export default function ChatPage() {
   const [messages, setMessages] = useState([
     {
@@ -37,9 +53,20 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const sendMessage = async (text) => {
+  /**
+   * Send a message and get an AI response with performance tracking
+   * @param {string} [text] - Optional text override (for suggested questions)
+   */
+  const sendMessage = useCallback(async (text) => {
     const userMsg = text || input.trim();
     if (!userMsg || isLoading) return;
+
+    // Rate limiting
+    if (!chatRateLimiter.canProceed()) return;
+
+    // Validate input
+    const validation = validateChatMessage(userMsg);
+    if (!validation.valid) return;
 
     const userMessage = {
       id: Date.now().toString(),
@@ -51,11 +78,19 @@ export default function ChatPage() {
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
-    trackChatMessage(userMsg.split(' ').slice(0, 3).join(' '));
+    trackChatMessage(extractTopicHint(userMsg));
 
     try {
       const chatHistory = messages.map(m => ({ role: m.role, content: m.content }));
-      const response = await generateChatResponse(userMsg, chatHistory);
+
+      // Measure AI response time with Firebase Performance trace
+      const { result: response, durationMs } = await measureAsync(
+        TRACE_NAMES.AI_CHAT_RESPONSE,
+        () => generateChatResponse(userMsg, chatHistory),
+        { query_length: String(userMsg.length) }
+      );
+
+      trackChatResponse(durationMs);
 
       setMessages(prev => [
         ...prev,
@@ -82,30 +117,21 @@ export default function ChatPage() {
       setIsLoading(false);
       inputRef.current?.focus();
     }
-  };
+  }, [input, isLoading, messages, incrementChatCount]);
 
-  const handleKeyDown = (e) => {
+  /** Handle Enter key to send messages */
+  const handleKeyDown = useCallback((e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
     }
-  };
+  }, [sendMessage]);
 
-  const resetChat = () => {
+  /** Reset conversation to initial state */
+  const resetChat = useCallback(() => {
     setMessages([messages[0]]);
     setInput('');
-  };
-
-  const formatContent = (content) => {
-    // Simple markdown-like formatting
-    return content
-      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.*?)\*/g, '<em>$1</em>')
-      .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1 ↗</a>')
-      .replace(/^• (.*)/gm, '<li>$1</li>')
-      .replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
-      .replace(/\n/g, '<br/>');
-  };
+  }, [messages]);
 
   return (
     <div className="chat-page">
@@ -113,18 +139,19 @@ export default function ChatPage() {
         {/* Header */}
         <div className="chat-header glass-card-static">
           <div className="chat-header-info">
-            <div className="chat-header-avatar">
+            <div className="chat-header-avatar" aria-hidden="true">
               <Sparkles size={20} />
             </div>
             <div>
               <h1 className="chat-header-title">NirvachAI Assistant</h1>
               <span className="chat-header-status">
-                <span className="chat-status-dot" /> Powered by Google Gemini AI
+                <span className="chat-status-dot" aria-hidden="true" />
+                Powered by Google Gemini AI
               </span>
             </div>
           </div>
           <div className="chat-header-actions">
-            <a href="https://eci.gov.in" target="_blank" rel="noopener noreferrer" className="btn btn-ghost btn-sm">
+            <a href={APP.ECI_URL} target="_blank" rel="noopener noreferrer" className="btn btn-ghost btn-sm">
               <ExternalLink size={14} /> ECI Website
             </a>
             <button className="btn btn-ghost btn-sm" onClick={resetChat} aria-label="Reset conversation">
@@ -138,7 +165,7 @@ export default function ChatPage() {
           {messages.map((msg) => (
             <div key={msg.id} className={`chat-message chat-message-${msg.role} animate-fade-in-up`}>
               <div className={`chat-bubble chat-bubble-${msg.role}`}>
-                <div dangerouslySetInnerHTML={{ __html: formatContent(msg.content) }} />
+                <div dangerouslySetInnerHTML={{ __html: sanitizeForDisplay(msg.content) }} />
               </div>
             </div>
           ))}
@@ -146,7 +173,7 @@ export default function ChatPage() {
           {isLoading && (
             <div className="chat-message chat-message-assistant animate-fade-in">
               <div className="chat-bubble chat-bubble-assistant">
-                <div className="typing-indicator">
+                <div className="typing-indicator" role="status" aria-label="NirvachAI is typing">
                   <span /><span /><span />
                 </div>
               </div>
@@ -187,6 +214,7 @@ export default function ChatPage() {
               rows={1}
               aria-label="Type your question"
               disabled={isLoading}
+              maxLength={2000}
             />
             <button
               className="chat-send-btn btn btn-primary"
@@ -198,7 +226,7 @@ export default function ChatPage() {
             </button>
           </div>
           <p className="chat-disclaimer">
-            NirvachAI may make mistakes. Verify important info at <a href="https://eci.gov.in" target="_blank" rel="noopener noreferrer">eci.gov.in</a>
+            NirvachAI may make mistakes. Verify important info at <a href={APP.ECI_URL} target="_blank" rel="noopener noreferrer">eci.gov.in</a>
           </p>
         </div>
       </div>

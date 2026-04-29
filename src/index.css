@@ -743,3 +743,70 @@ a:hover {
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
 }
+
+/* --- Page Loader (Code Splitting) --- */
+.page-loader {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 50vh;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.page-loader-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--color-border);
+  border-top-color: var(--color-saffron);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* --- Spinner Icon (inline) --- */
+.spinner-icon {
+  animation: spin 1s linear infinite;
+}
+
+/* --- Encyclopedia AI Section --- */
+.encyclopedia-ai-section {
+  margin-top: var(--space-4);
+}
+
+.encyclopedia-ai-btn {
+  margin-top: var(--space-2);
+}
+
+.encyclopedia-ai-result {
+  margin-top: var(--space-3);
+  padding: var(--space-4);
+  background: rgba(139, 92, 246, 0.08);
+  border: 1px solid rgba(139, 92, 246, 0.15);
+  border-radius: var(--radius-md);
+}
+
+.encyclopedia-ai-result h4 {
+  font-size: var(--text-sm);
+  color: #A78BFA;
+  margin-bottom: var(--space-2);
+}
+
+.encyclopedia-ai-result p {
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+.encyclopedia-card-toggle {
+  all: unset;
+  display: block;
+  width: 100%;
+  cursor: pointer;
+  text-align: left;
+}
+
+/* --- Quiz AI Explanation Loading --- */
+.quiz-explanation-loading {
+  color: var(--color-text-tertiary);
+  font-style: italic;
+  animation: pulse 1.5s ease-in-out infinite;
+}

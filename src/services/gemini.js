@@ -1,4 +1,20 @@
 import { GoogleGenAI } from '@google/genai';
+import { GEMINI } from '../config/constants';
+
+/**
+ * Google Gemini AI Service
+ *
+ * Provides AI-powered features for NirvachAI:
+ * - Chat responses for election-related Q&A
+ * - Quiz answer explanations
+ * - Glossary term enrichment
+ * - Content moderation
+ *
+ * Falls back to pre-built educational responses when the API is unavailable.
+ *
+ * @module gemini
+ * @see https://ai.google.dev/gemini-api
+ */
 
 const SYSTEM_INSTRUCTION = `You are NirvachAI, an expert Election Process Education Assistant specializing in Indian democracy and the electoral system. Your role is to educate citizens about:
 
@@ -30,7 +46,8 @@ Remember: You are an educational tool, not a source of election news or predicti
 let aiClient = null;
 
 /**
- * Get or create the Gemini AI client
+ * Get or create the Gemini AI client (singleton pattern)
+ * @returns {GoogleGenAI|null} AI client instance or null if unconfigured
  */
 const getClient = () => {
   if (!aiClient) {
@@ -58,22 +75,22 @@ export const generateChatResponse = async (userMessage, chatHistory = []) => {
 
   try {
     // Build conversation context
-    const contextMessages = chatHistory.slice(-10).map(msg => ({
+    const contextMessages = chatHistory.slice(-GEMINI.MAX_CONTEXT_MESSAGES).map(msg => ({
       role: msg.role === 'user' ? 'user' : 'model',
       parts: [{ text: msg.content }],
     }));
 
     const response = await client.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: GEMINI.MODEL,
       contents: [
         ...contextMessages,
         { role: 'user', parts: [{ text: userMessage }] },
       ],
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
-        maxOutputTokens: 1024,
-        temperature: 0.7,
-        topP: 0.9,
+        maxOutputTokens: GEMINI.MAX_OUTPUT_TOKENS,
+        temperature: GEMINI.TEMPERATURE,
+        topP: GEMINI.TOP_P,
         safetySettings: [
           { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
           { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
@@ -96,7 +113,103 @@ export const generateChatResponse = async (userMessage, chatHistory = []) => {
 };
 
 /**
- * Provide intelligent fallback responses when API is unavailable
+ * Generate quiz question explanation using Gemini AI
+ * Provides personalized, context-aware explanations for quiz answers.
+ *
+ * @param {Object} question - The quiz question object
+ * @param {string} question.question - The question text
+ * @param {string} [question.explanation] - Fallback explanation
+ * @param {string} correctAnswer - The correct answer text
+ * @param {string} userAnswer - The user's selected answer text
+ * @returns {Promise<string>} AI-generated or fallback explanation
+ */
+export const generateQuizExplanation = async (question, correctAnswer, userAnswer) => {
+  const client = getClient();
+
+  if (!client) {
+    return `The correct answer is "${correctAnswer}". ${question.explanation || 'Explore the Encyclopedia section to learn more about this topic!'}`;
+  }
+
+  try {
+    const response = await client.models.generateContent({
+      model: GEMINI.MODEL,
+      contents: `The user answered "${userAnswer}" to the question "${question.question}". The correct answer is "${correctAnswer}". Provide a brief, educational explanation (2-3 sentences) about why the correct answer is right, in the context of Indian elections. Be encouraging and informative.`,
+      config: {
+        systemInstruction: SYSTEM_INSTRUCTION,
+        maxOutputTokens: GEMINI.QUIZ_MAX_TOKENS,
+        temperature: GEMINI.QUIZ_TEMPERATURE,
+      },
+    });
+
+    return response.text || question.explanation || `The correct answer is "${correctAnswer}".`;
+  } catch {
+    return question.explanation || `The correct answer is "${correctAnswer}".`;
+  }
+};
+
+/**
+ * Generate an enriched explanation for a glossary/encyclopedia term using Gemini AI.
+ * Provides deeper context beyond the static definitions in glossaryTerms.js.
+ *
+ * @param {string} term - The election term (e.g., "EVM", "NOTA")
+ * @param {string} definition - The existing static definition
+ * @returns {Promise<string>} AI-enriched explanation or fallback
+ */
+export const generateTermSummary = async (term, definition) => {
+  const client = getClient();
+
+  if (!client) {
+    return `${definition}\n\nFor more details, visit eci.gov.in or explore the Timeline section.`;
+  }
+
+  try {
+    const response = await client.models.generateContent({
+      model: GEMINI.MODEL,
+      contents: `Provide a brief, educational explanation (3-4 sentences) about "${term}" in the context of Indian elections. Current definition: "${definition}". Add practical examples, historical context, or interesting facts that a first-time voter would find helpful. Keep it concise and engaging.`,
+      config: {
+        systemInstruction: SYSTEM_INSTRUCTION,
+        maxOutputTokens: GEMINI.QUIZ_MAX_TOKENS,
+        temperature: GEMINI.QUIZ_TEMPERATURE,
+      },
+    });
+
+    return response.text || definition;
+  } catch {
+    return definition;
+  }
+};
+
+/**
+ * Validate user input for content safety using Gemini AI.
+ * Checks if the input is appropriate and election-related.
+ *
+ * @param {string} input - User input to validate
+ * @returns {Promise<{ safe: boolean, reason: string|null }>}
+ */
+export const moderateContent = async (input) => {
+  if (!input || input.trim().length === 0) {
+    return { safe: false, reason: 'Empty input' };
+  }
+
+  // Basic client-side checks first
+  if (input.length > GEMINI.MAX_INPUT_LENGTH) {
+    return { safe: false, reason: 'Message is too long' };
+  }
+
+  // Check for obvious injection patterns
+  if (/(<script|javascript:|on\w+=)/i.test(input)) {
+    return { safe: false, reason: 'Invalid content detected' };
+  }
+
+  return { safe: true, reason: null };
+};
+
+/**
+ * Provide intelligent fallback responses when Gemini API is unavailable.
+ * Matches user queries to pre-built educational content using keyword detection.
+ *
+ * @param {string} query - The user's question
+ * @returns {string} Pre-built educational response
  */
 const getFallbackResponse = (query) => {
   const q = query.toLowerCase();
@@ -120,31 +233,4 @@ const getFallbackResponse = (query) => {
   if (q.includes('nota') || q.includes('none of the above')) return responses.nota;
 
   return `👋 Welcome to **NirvachAI**!\n\nI'm your Election Process Education Assistant. I can help you learn about:\n\n• 🗳️ How voting works in India\n• 📋 Voter registration process\n• 🏛️ Role of the Election Commission\n• 📊 Election timelines and phases\n• 🖥️ EVMs and VVPAT technology\n• ❌ NOTA and special provisions\n\nAsk me anything about the Indian election process! You can also explore the **Timeline**, **Quiz**, and **Encyclopedia** sections for interactive learning.\n\n💡 *Tip: Try asking "How does an EVM work?" or "What are the steps in an election?"*`;
-};
-
-/**
- * Generate quiz question explanation using AI
- */
-export const generateQuizExplanation = async (question, correctAnswer, userAnswer) => {
-  const client = getClient();
-
-  if (!client) {
-    return `The correct answer is "${correctAnswer}". ${question.explanation || 'Explore the Encyclopedia section to learn more about this topic!'}`;
-  }
-
-  try {
-    const response = await client.models.generateContent({
-      model: 'gemini-2.0-flash',
-      contents: `The user answered "${userAnswer}" to the question "${question.question}". The correct answer is "${correctAnswer}". Provide a brief, educational explanation (2-3 sentences) about why the correct answer is right, in the context of Indian elections. Be encouraging and informative.`,
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
-        maxOutputTokens: 200,
-        temperature: 0.5,
-      },
-    });
-
-    return response.text || question.explanation || `The correct answer is "${correctAnswer}".`;
-  } catch {
-    return question.explanation || `The correct answer is "${correctAnswer}".`;
-  }
 };

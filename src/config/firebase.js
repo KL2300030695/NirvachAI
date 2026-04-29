@@ -11,7 +11,8 @@ import { getPerformance } from 'firebase/performance';
  * - Firebase Authentication (Google Sign-In + Anonymous)
  * - Cloud Firestore (user progress persistence)
  * - Firebase Analytics (engagement tracking)
- * - Firebase Performance Monitoring (Core Web Vitals)
+ * - Firebase Performance Monitoring (Core Web Vitals + custom traces)
+ * - Firebase Remote Config (dynamic feature flags)
  * 
  * All services are initialized conditionally — the app works
  * fully offline or without valid Firebase credentials.

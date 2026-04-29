@@ -1,19 +1,23 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
-  trackPageView, trackChatMessage, trackChatResponse, trackAIFallback,
+  trackPageView, trackScreenView, trackChatMessage, trackChatResponse, trackAIFallback,
+  trackAIExplainUsed,
   trackQuizStart, trackQuizComplete, trackQuizAnswer,
   trackTimelineStageViewed, trackTimelineComplete,
   trackTermViewed, trackSearch, trackTermBookmarked,
   trackFeatureUsage, trackLogin, trackSignUp, trackSignOut,
   trackChecklistProgress, trackChecklistComplete,
-  trackAchievementUnlocked, trackAppPerformance, trackError,
+  trackAchievementUnlocked, trackAppPerformance, trackUserEngagement, trackError,
   setUserProperties, setAnalyticsUserId,
 } from '../services/analytics';
 
 describe('Firebase Analytics Service', () => {
-  describe('Page Tracking', () => {
+  describe('Page & Screen Tracking', () => {
     it('trackPageView should not throw', () => {
       expect(() => trackPageView('Home')).not.toThrow();
+    });
+    it('trackScreenView should not throw', () => {
+      expect(() => trackScreenView('Home', 'Page')).not.toThrow();
     });
   });
 
@@ -26,6 +30,9 @@ describe('Firebase Analytics Service', () => {
     });
     it('trackAIFallback should not throw', () => {
       expect(() => trackAIFallback('quota_exceeded')).not.toThrow();
+    });
+    it('trackAIExplainUsed should not throw', () => {
+      expect(() => trackAIExplainUsed('EVM')).not.toThrow();
     });
   });
 
@@ -90,9 +97,12 @@ describe('Firebase Analytics Service', () => {
     });
   });
 
-  describe('Performance & Error Tracking', () => {
+  describe('Performance, Engagement & Error Tracking', () => {
     it('trackAppPerformance should not throw', () => {
       expect(() => trackAppPerformance()).not.toThrow();
+    });
+    it('trackUserEngagement should not throw', () => {
+      expect(() => trackUserEngagement('chat', 5000)).not.toThrow();
     });
     it('trackError should not throw', () => {
       expect(() => trackError('test_error', 'Something went wrong')).not.toThrow();
@@ -111,13 +121,14 @@ describe('Firebase Analytics Service', () => {
   describe('All exports are functions', () => {
     it('should export all tracking functions', () => {
       const functions = [
-        trackPageView, trackChatMessage, trackChatResponse, trackAIFallback,
+        trackPageView, trackScreenView, trackChatMessage, trackChatResponse, trackAIFallback,
+        trackAIExplainUsed,
         trackQuizStart, trackQuizComplete, trackQuizAnswer,
         trackTimelineStageViewed, trackTimelineComplete,
         trackTermViewed, trackSearch, trackTermBookmarked,
         trackFeatureUsage, trackLogin, trackSignUp, trackSignOut,
         trackChecklistProgress, trackChecklistComplete,
-        trackAchievementUnlocked, trackAppPerformance, trackError,
+        trackAchievementUnlocked, trackAppPerformance, trackUserEngagement, trackError,
         setUserProperties, setAnalyticsUserId,
       ];
       functions.forEach(fn => {

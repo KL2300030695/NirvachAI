@@ -1,10 +1,19 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { quizCategories, quizQuestions } from '../data/quizQuestions';
 import { useFirestore } from '../hooks/useFirestore';
 import { trackPageView, trackQuizStart, trackQuizComplete, trackQuizAnswer } from '../services/analytics';
-import { ArrowRight, RotateCcw, CheckCircle2, XCircle, Trophy, Star, ArrowLeft } from 'lucide-react';
+import { generateQuizExplanation } from '../services/gemini';
+import { startTrace, stopTrace, setTraceAttribute, setTraceMetric, TRACE_NAMES } from '../services/performanceService';
+import { formatPercentage, getQuizResultMessage, capitalize } from '../utils/formatters';
+import { ArrowRight, RotateCcw, CheckCircle2, XCircle, Trophy, Star, ArrowLeft, Sparkles } from 'lucide-react';
 import './pages.css';
 
+/**
+ * QuizPage — Categorized knowledge quiz with AI-powered explanations.
+ * Uses Google Gemini AI for personalized answer explanations and
+ * Firebase Performance for completion time tracking.
+ * @returns {JSX.Element}
+ */
 export default function QuizPage() {
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [selectedDifficulty, setSelectedDifficulty] = useState('beginner');
@@ -13,6 +22,9 @@ export default function QuizPage() {
   const [isAnswered, setIsAnswered] = useState(false);
   const [score, setScore] = useState(0);
   const [showResults, setShowResults] = useState(false);
+  const [aiExplanation, setAiExplanation] = useState(null);
+  const [isLoadingExplanation, setIsLoadingExplanation] = useState(false);
+  const [quizTrace, setQuizTrace] = useState(null);
   const { saveQuizScore } = useFirestore();
 
   useEffect(() => { trackPageView('Quiz'); }, []);
@@ -26,47 +38,86 @@ export default function QuizPage() {
 
   const currentQuestion = questions[currentIndex];
 
-  const startQuiz = (catId) => {
+  /** Start a quiz in the selected category with performance tracing */
+  const startQuiz = useCallback(async (catId) => {
     setSelectedCategory(catId);
     setCurrentIndex(0);
     setScore(0);
     setSelectedAnswer(null);
     setIsAnswered(false);
     setShowResults(false);
+    setAiExplanation(null);
     trackQuizStart(catId, selectedDifficulty);
-  };
 
-  const handleAnswer = (index) => {
+    // Start a Firebase Performance trace for quiz completion time
+    const trace = await startTrace(TRACE_NAMES.QUIZ_COMPLETION);
+    if (trace) {
+      setTraceAttribute(trace, 'category', catId);
+      setTraceAttribute(trace, 'difficulty', selectedDifficulty);
+    }
+    setQuizTrace(trace);
+  }, [selectedDifficulty]);
+
+  /** Handle answer selection with AI explanation generation */
+  const handleAnswer = useCallback(async (index) => {
     if (isAnswered) return;
     setSelectedAnswer(index);
     setIsAnswered(true);
     const correct = index === currentQuestion.correctAnswer;
     if (correct) setScore(s => s + 1);
     trackQuizAnswer(correct);
-  };
 
-  const nextQuestion = () => {
+    // Generate AI-powered explanation
+    setIsLoadingExplanation(true);
+    try {
+      const explanation = await generateQuizExplanation(
+        currentQuestion,
+        currentQuestion.options[currentQuestion.correctAnswer],
+        currentQuestion.options[index]
+      );
+      setAiExplanation(explanation);
+    } catch {
+      setAiExplanation(currentQuestion.explanation);
+    } finally {
+      setIsLoadingExplanation(false);
+    }
+  }, [isAnswered, currentQuestion]);
+
+  /** Move to next question or show results */
+  const nextQuestion = useCallback(() => {
     if (currentIndex + 1 >= questions.length) {
       setShowResults(true);
       trackQuizComplete(selectedCategory, score, questions.length);
       saveQuizScore(selectedCategory, score, questions.length);
+
+      // Stop the performance trace
+      if (quizTrace) {
+        setTraceMetric(quizTrace, 'score', score);
+        setTraceMetric(quizTrace, 'total_questions', questions.length);
+        stopTrace(quizTrace);
+      }
     } else {
       setCurrentIndex(i => i + 1);
       setSelectedAnswer(null);
       setIsAnswered(false);
+      setAiExplanation(null);
     }
-  };
+  }, [currentIndex, questions, selectedCategory, score, saveQuizScore, quizTrace]);
 
-  const resetQuiz = () => {
+  /** Reset quiz to category selection */
+  const resetQuiz = useCallback(() => {
     setSelectedCategory(null);
     setCurrentIndex(0);
     setScore(0);
     setSelectedAnswer(null);
     setIsAnswered(false);
     setShowResults(false);
-  };
+    setAiExplanation(null);
+    if (quizTrace) stopTrace(quizTrace);
+    setQuizTrace(null);
+  }, [quizTrace]);
 
-  // Category selection
+  // Category selection screen
   if (!selectedCategory) {
     return (
       <div className="page-container">
@@ -84,7 +135,7 @@ export default function QuizPage() {
               className={`btn ${selectedDifficulty === d ? 'btn-primary' : 'btn-secondary'} btn-sm`}
               onClick={() => setSelectedDifficulty(d)}
             >
-              {d.charAt(0).toUpperCase() + d.slice(1)}
+              {capitalize(d)}
             </button>
           ))}
         </div>
@@ -116,14 +167,8 @@ export default function QuizPage() {
 
   // Results screen
   if (showResults) {
-    const percentage = Math.round((score / questions.length) * 100);
-    const getMessage = () => {
-      if (percentage === 100) return { emoji: '🏆', text: 'Perfect Score! You\'re an election expert!' };
-      if (percentage >= 75) return { emoji: '🌟', text: 'Excellent! Great understanding of the process!' };
-      if (percentage >= 50) return { emoji: '👍', text: 'Good effort! Keep learning to improve!' };
-      return { emoji: '📚', text: 'Keep exploring! The Timeline and Encyclopedia can help!' };
-    };
-    const result = getMessage();
+    const percentage = formatPercentage(score, questions.length);
+    const result = getQuizResultMessage(percentage);
 
     return (
       <div className="page-container">
@@ -210,7 +255,16 @@ export default function QuizPage() {
 
           {isAnswered && (
             <div className="quiz-explanation animate-fade-in-up">
-              <p><strong>💡 Explanation:</strong> {currentQuestion.explanation}</p>
+              <p>
+                <strong>
+                  <Sparkles size={14} style={{ display: 'inline', verticalAlign: 'middle' }} /> AI Explanation:
+                </strong>{' '}
+                {isLoadingExplanation ? (
+                  <span className="quiz-explanation-loading">Generating explanation with Gemini AI…</span>
+                ) : (
+                  aiExplanation || currentQuestion.explanation
+                )}
+              </p>
               <button className="btn btn-primary" onClick={nextQuestion}>
                 {currentIndex + 1 >= questions.length ? 'See Results' : 'Next Question'} <ArrowRight size={16} />
               </button>

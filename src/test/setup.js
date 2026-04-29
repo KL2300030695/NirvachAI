@@ -14,9 +14,11 @@ vi.mock('../config/firebase', () => ({
 // Mock analytics — all functions as no-ops
 vi.mock('../services/analytics', () => ({
   trackPageView: vi.fn(),
+  trackScreenView: vi.fn(),
   trackChatMessage: vi.fn(),
   trackChatResponse: vi.fn(),
   trackAIFallback: vi.fn(),
+  trackAIExplainUsed: vi.fn(),
   trackQuizStart: vi.fn(),
   trackQuizComplete: vi.fn(),
   trackQuizAnswer: vi.fn(),
@@ -33,6 +35,7 @@ vi.mock('../services/analytics', () => ({
   trackChecklistComplete: vi.fn(),
   trackAchievementUnlocked: vi.fn(),
   trackAppPerformance: vi.fn(),
+  trackUserEngagement: vi.fn(),
   trackError: vi.fn(),
   setUserProperties: vi.fn().mockResolvedValue(undefined),
   setAnalyticsUserId: vi.fn().mockResolvedValue(undefined),
@@ -67,6 +70,7 @@ if (!global.performance?.getEntriesByType) {
     value: {
       ...global.performance,
       getEntriesByType: () => [],
+      now: () => Date.now(),
     },
   });
 }

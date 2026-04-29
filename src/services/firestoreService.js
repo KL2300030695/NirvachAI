@@ -1,10 +1,12 @@
 import { db, isFirebaseConfigured } from '../config/firebase';
+import { STORAGE_KEYS } from '../config/constants';
 
 /**
  * Firebase Firestore Service
  * 
  * Provides CRUD operations for user data in Cloud Firestore.
  * Falls back to localStorage when Firestore is unavailable.
+ * Includes real-time sync capability for leaderboard data.
  * 
  * Collections:
  * - users/{uid} — User profiles and progress
@@ -14,10 +16,11 @@ import { db, isFirebaseConfigured } from '../config/firebase';
  */
 
 let firestoreAvailable = false;
-let docFn, setDocFn, getDocFn, updateDocFn, serverTimestampFn;
+let docFn, setDocFn, getDocFn, updateDocFn, serverTimestampFn, onSnapshotFn, collectionFn, queryFn, orderByFn, limitFn;
 
 /**
- * Lazily load Firestore functions
+ * Lazily load Firestore functions to reduce initial bundle size
+ * @returns {Promise<boolean>} Whether Firestore functions loaded successfully
  */
 const loadFirestoreFunctions = async () => {
   if (firestoreAvailable || !isFirebaseConfigured || !db) return false;
@@ -28,6 +31,11 @@ const loadFirestoreFunctions = async () => {
     getDocFn = firestore.getDoc;
     updateDocFn = firestore.updateDoc;
     serverTimestampFn = firestore.serverTimestamp;
+    onSnapshotFn = firestore.onSnapshot;
+    collectionFn = firestore.collection;
+    queryFn = firestore.query;
+    orderByFn = firestore.orderBy;
+    limitFn = firestore.limit;
     firestoreAvailable = true;
     return true;
   } catch (e) {
@@ -36,9 +44,10 @@ const loadFirestoreFunctions = async () => {
 };
 
 /**
- * Save user profile to Firestore
+ * Save user profile to Firestore with localStorage fallback
  * @param {string} uid - User ID
  * @param {Object} profileData - User profile data
+ * @returns {Promise<boolean>} Whether save succeeded on Firestore
  */
 export const saveUserProfile = async (uid, profileData) => {
   await loadFirestoreFunctions();
@@ -56,13 +65,13 @@ export const saveUserProfile = async (uid, profileData) => {
   }
   // Fallback to localStorage
   try {
-    localStorage.setItem(`nirvachai_user_${uid}`, JSON.stringify(profileData));
+    localStorage.setItem(`${STORAGE_KEYS.USER_PREFIX}${uid}`, JSON.stringify(profileData));
   } catch (e) { /* storage full */ }
   return false;
 };
 
 /**
- * Load user profile from Firestore
+ * Load user profile from Firestore with localStorage fallback
  * @param {string} uid - User ID
  * @returns {Promise<Object|null>} User profile or null
  */
@@ -81,7 +90,7 @@ export const loadUserProfile = async (uid) => {
   }
   // Fallback to localStorage
   try {
-    const stored = localStorage.getItem(`nirvachai_user_${uid}`);
+    const stored = localStorage.getItem(`${STORAGE_KEYS.USER_PREFIX}${uid}`);
     return stored ? JSON.parse(stored) : null;
   } catch (e) {
     return null;
@@ -92,6 +101,7 @@ export const loadUserProfile = async (uid) => {
  * Update specific fields in user profile
  * @param {string} uid - User ID
  * @param {Object} updates - Fields to update
+ * @returns {Promise<boolean>} Whether update succeeded on Firestore
  */
 export const updateUserProfile = async (uid, updates) => {
   await loadFirestoreFunctions();
@@ -116,10 +126,10 @@ export const updateUserProfile = async (uid, updates) => {
   }
   // Fallback: merge into localStorage
   try {
-    const stored = localStorage.getItem(`nirvachai_user_${uid}`);
+    const stored = localStorage.getItem(`${STORAGE_KEYS.USER_PREFIX}${uid}`);
     const current = stored ? JSON.parse(stored) : {};
     const merged = { ...current, ...updates };
-    localStorage.setItem(`nirvachai_user_${uid}`, JSON.stringify(merged));
+    localStorage.setItem(`${STORAGE_KEYS.USER_PREFIX}${uid}`, JSON.stringify(merged));
   } catch (e) { /* ignore */ }
   return false;
 };
@@ -131,6 +141,7 @@ export const updateUserProfile = async (uid, updates) => {
  * @param {string} category - Quiz category
  * @param {number} score - Score achieved
  * @param {number} total - Total questions
+ * @returns {Promise<boolean>} Whether save succeeded
  */
 export const saveToLeaderboard = async (uid, displayName, category, score, total) => {
   await loadFirestoreFunctions();
@@ -152,4 +163,46 @@ export const saveToLeaderboard = async (uid, displayName, category, score, total
     }
   }
   return false;
+};
+
+/**
+ * Subscribe to real-time leaderboard updates using Firestore onSnapshot.
+ * Demonstrates real-time sync capability with Cloud Firestore.
+ *
+ * @param {string} category - Quiz category to filter
+ * @param {number} maxResults - Maximum number of results
+ * @param {Function} callback - Called with array of leaderboard entries
+ * @returns {Function|null} Unsubscribe function, or null if unavailable
+ */
+export const subscribeToLeaderboard = async (category, maxResults = 10, callback) => {
+  await loadFirestoreFunctions();
+  if (!firestoreAvailable || !db || !onSnapshotFn) return null;
+
+  try {
+    const leaderboardCol = collectionFn(db, 'leaderboard');
+    const q = queryFn(
+      leaderboardCol,
+      orderByFn('percentage', 'desc'),
+      limitFn(maxResults)
+    );
+
+    const unsubscribe = onSnapshotFn(q, (snapshot) => {
+      const entries = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        if (!category || data.category === category) {
+          entries.push({ id: doc.id, ...data });
+        }
+      });
+      callback(entries);
+    }, (error) => {
+      console.warn('Leaderboard subscription error:', error.code);
+      callback([]);
+    });
+
+    return unsubscribe;
+  } catch (e) {
+    console.warn('Leaderboard subscription failed:', e.message);
+    return null;
+  }
 };
